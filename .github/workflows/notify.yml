@@ -1,0 +1,42 @@
+name: Mod Update Notify
+
+on:
+  schedule:
+    - cron: "13 */3 * * *"
+  workflow_dispatch:
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Restore perm-data cache
+        uses: actions/cache/restore@v4
+        with:
+          path: perm-data.json
+          key: perm-data
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Run notify
+        env:
+          MODRINTH_API_TOKEN: ${{ secrets.MODRINTH_API_TOKEN }}
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+        run: bun run notify
+
+      - name: Delete old cache
+        if: always()
+        run: gh cache delete perm-data --repo ${{ github.repository }} || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Save perm-data cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: perm-data.json
+          key: perm-data

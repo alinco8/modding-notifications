@@ -1,0 +1,5 @@
+[discord]
+channel_id = "1521545931911073844"
+
+[mods.iv2jCzkP]
+target_loaders = ["fabric", "neoforge"]

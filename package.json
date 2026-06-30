@@ -1,0 +1,21 @@
+{
+  "name": "modding-notifications",
+  "private": true,
+  "type": "module",
+  "module": "src/cli.ts",
+  "scripts": {
+    "install": "lefthook install",
+    "check-config": "bun run . check",
+    "notify": "bun run . notify"
+  },
+  "devDependencies": {
+    "@modrinth/api-client": "^0.23.0",
+    "@types/bun": "latest",
+    "discord.js": "^14.26.4",
+    "lefthook": "^2.1.9",
+    "zod": "^4.4.3"
+  },
+  "peerDependencies": {
+    "typescript": "^6"
+  }
+}
