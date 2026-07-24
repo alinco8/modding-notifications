@@ -15,15 +15,21 @@ export const PermDataSchema = z.record(
   ),
 );
 
+const DEFAULT_PERM_DATA: z.infer<typeof PermDataSchema> = {};
+
 export async function getPermData() {
   if (!(await Bun.file(PERM_DATA_PATH).exists())) {
-    await Bun.file(PERM_DATA_PATH).write(JSON.stringify({}));
+    await Bun.file(PERM_DATA_PATH).write(JSON.stringify(DEFAULT_PERM_DATA));
   }
 
   const json = await Bun.file(PERM_DATA_PATH).json();
 
   const result = PermDataSchema.safeParse(json);
-  if (!result.success) return {} satisfies z.infer<typeof PermDataSchema>;
+  if (!result.success) {
+    await Bun.file(PERM_DATA_PATH).write(JSON.stringify(DEFAULT_PERM_DATA, null, 2));
+
+    return DEFAULT_PERM_DATA;
+  }
 
   return result.data;
 }
