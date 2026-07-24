@@ -1,13 +1,18 @@
 import { z } from "zod";
 import { PERM_DATA_PATH } from "./constants";
 
-export const PermData = z.record(
+export const PermDataSchema = z.record(
   z.string(),
-  z.object({
-    lastNotifiedMcVersion: z.string().optional(),
-    notifiedDeps: z.array(z.string()).optional(),
-    readyForUpdateNotified: z.boolean().optional(),
-  }),
+  z.record(
+    z.string(),
+    z
+      .object({
+        lastNotifiedMcVersion: z.string(),
+        notifiedDeps: z.record(z.string(), z.string()),
+        readyForUpdateNotified: z.boolean(),
+      })
+      .partial(),
+  ),
 );
 
 export async function getPermData() {
@@ -17,5 +22,8 @@ export async function getPermData() {
 
   const json = await Bun.file(PERM_DATA_PATH).json();
 
-  return PermData.parse(json);
+  const result = PermDataSchema.safeParse(json);
+  if (!result.success) return {} satisfies z.infer<typeof PermDataSchema>;
+
+  return result.data;
 }

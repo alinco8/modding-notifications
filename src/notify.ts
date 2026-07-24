@@ -61,15 +61,19 @@ export async function notify() {
 
         const lines: string[] = [];
 
-        const isNewMcVersionNotice = permData[modId]?.lastNotifiedMcVersion !== latestMcVersion;
+        const isNewMcVersionNotice =
+          permData[modId]?.[loader]?.lastNotifiedMcVersion !== latestMcVersion;
         if (isNewMcVersionNotice) {
           lines.push(
             `Minecraft ${latestMcVersion} was released, but this mod has not been updated for it yet.`,
           );
 
           permData[modId] ??= {};
-          permData[modId].lastNotifiedMcVersion = latestMcVersion;
-          permData[modId].notifiedDeps = [];
+          permData[modId][loader] ??= {};
+          permData[modId][loader].lastNotifiedMcVersion = latestMcVersion;
+          permData[modId][loader].notifiedDeps = {};
+          permData[modId][loader].readyForUpdateNotified = false;
+
           permDataDirty = true;
         }
 
@@ -92,19 +96,22 @@ export async function notify() {
             loaders: [loader],
           });
 
-          if (depVersions.length === 0) {
+          const latestDepVersion = depVersions[0];
+
+          if (!latestDepVersion) {
             incompatibleDepFound = true;
             continue;
           }
 
-          if (permData[modId]?.notifiedDeps?.includes(dep.project_id)) continue;
+          if (permData[modId]?.[loader]?.notifiedDeps?.[dep.project_id]) continue;
 
           const depLabel = dep.file_name ?? dep.project_id;
           newlyAvailableDeps.push(`- [${depLabel}](https://modrinth.com/mod/${dep.project_id})`);
 
           permData[modId] ??= {};
-          permData[modId].notifiedDeps ??= [];
-          permData[modId].notifiedDeps.push(dep.project_id);
+          permData[modId][loader] ??= {};
+          permData[modId][loader].notifiedDeps ??= {};
+          permData[modId][loader].notifiedDeps[dep.project_id] = latestDepVersion.version_number;
           permDataDirty = true;
         }
 
@@ -112,11 +119,12 @@ export async function notify() {
           lines.push(`Dependency now updated for ${latestMcVersion}:`, ...newlyAvailableDeps);
         }
 
-        if (!incompatibleDepFound && !permData[modId]?.readyForUpdateNotified) {
+        if (!incompatibleDepFound && !permData[modId]?.[loader]?.readyForUpdateNotified) {
           lines.push(`All required dependencies are ready. This mod can be updated now.`);
 
           permData[modId] ??= {};
-          permData[modId].readyForUpdateNotified = true;
+          permData[modId][loader] ??= {};
+          permData[modId][loader].readyForUpdateNotified = true;
           permDataDirty = true;
         }
 
