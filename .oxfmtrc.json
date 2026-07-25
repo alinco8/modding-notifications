@@ -1,0 +1,28 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "ignorePatterns": ["node_modules", ".output"],
+  "tabWidth": 2,
+  "printWidth": 100,
+  "sortImports": {
+    "internalPattern": ["$lib/**", "~/**"],
+    "groups": [
+      "type-import",
+      ["value-builtin", "value-external"],
+      "type-internal",
+      "value-internal",
+      ["type-parent", "type-sibling", "type-index"],
+      ["value-parent", "value-sibling", "value-index"],
+      "side_effect",
+      "side_effect_style",
+      "unknown"
+    ]
+  },
+  "overrides": [
+    {
+      "files": ["*.ts", "*.tsx", "*.js", "*.jsx"],
+      "options": {
+        "tabWidth": 4
+      }
+    }
+  ]
+}

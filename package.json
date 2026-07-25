@@ -9,10 +9,13 @@
     "notify": "bun run . notify"
   },
   "devDependencies": {
-    "@modrinth/api-client": "^0.23.0",
+    "@modrinth/api-client": "^0.37.0",
     "@types/bun": "latest",
-    "discord.js": "^14.26.4",
-    "lefthook": "^2.1.9",
+    "discord.js": "^14.27.0",
+    "lefthook": "^2.1.10",
+    "oxfmt": "^0.60.0",
+    "oxlint": "^1.75.0",
+    "oxlint-tsgolint": "^7.0.2001",
     "zod": "^4.4.3"
   },
   "peerDependencies": {

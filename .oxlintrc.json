@@ -1,0 +1,38 @@
+{
+  "plugins": ["eslint", "typescript", "unicorn", "oxc", "import", "jsx-a11y", "node", "promise"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error",
+    "perf": "error"
+  },
+  "options": {
+    "typeAware": true,
+    "reportUnusedDisableDirectives": "error"
+  },
+  "rules": {
+    "import/no-unassigned-import": [
+      "error",
+      {
+        "allow": ["**/*.css"]
+      }
+    ],
+    "eslint/max-lines-per-function": [
+      "error",
+      {
+        "max": 100
+      }
+    ],
+    "eslint/no-await-in-loop": "off",
+    "eslint-plugin-promise/always-return": [
+      "error",
+      {
+        "ignoreLastCallback": true
+      }
+    ]
+  },
+  "env": {
+    "builtin": true
+  },
+  "globals": {},
+  "ignorePatterns": ["**/.wxt/", "**/node_modules/"]
+}

@@ -1,149 +1,174 @@
-import { getConfig } from "./lib/config";
 import { AuthFeature, GenericModrinthClient, RetryFeature } from "@modrinth/api-client";
-import { VersionManifestV2Schema } from "./lib/mojang";
-import { compareMcVersions } from "./lib/mcver";
-import { getPermData } from "./lib/perm-data";
 import { Client, GatewayIntentBits } from "discord.js";
-import { PERM_DATA_PATH } from "./lib/constants";
 
-export async function notify() {
-  if (!Bun.env.MODRINTH_API_TOKEN)
-    throw new Error("MODRINTH_API_TOKEN is not set in environment variables.");
-  if (!Bun.env.DISCORD_BOT_TOKEN)
-    throw new Error("DISCORD_BOT_TOKEN is not set in environment variables.");
+import { getConfig } from "./lib/config";
+import { compareMcVersions } from "./lib/mcver";
+import { getPermData, savePermData, type PermData } from "./lib/perm-data";
+import { VersionManifestV2Schema } from "./lib/schemas/mojang";
 
-  const discordClient = new Client({
-    intents: [GatewayIntentBits.Guilds],
-  });
+const MESSAGES = {
+    MINECRAFT_VERSION_UNSUPPORTED: (mcVersion: string) =>
+        `New Minecraft version ${mcVersion} is not supported by this mod!`,
+    DEPENDENCY_SUPPORTED_NEW_MC: (depName: string, mcVersion: string) =>
+        `Dependency ${depName} is now supported on Minecraft version ${mcVersion}.`,
+    READY_TO_UPDATE: (mcVersion: string) =>
+        `This mod is now ready to update to Minecraft version ${mcVersion}.`,
+} satisfies Record<string, (...args: any[]) => string>;
 
-  try {
-    await discordClient.login(Bun.env.DISCORD_BOT_TOKEN);
+const depNameCache = new Map<string, string>();
 
-    const config = await getConfig();
-    const permData = await getPermData();
-    let permDataDirty = false;
+async function getTextChannel(client: Client, channelId: string) {
+    const channel = await client.channels.fetch(channelId);
 
-    const { labrinth } = new GenericModrinthClient({
-      features: [
-        new RetryFeature({ maxAttempts: 3 }),
-        //@ts-expect-error typescript couldn't detect the `token` property
-        new AuthFeature({ token: Bun.env.MODRINTH_API_TOKEN }),
-      ],
-    });
-
-    const channel = await discordClient.channels.fetch(config.discord.channel_id);
     if (!channel) throw new Error("Discord channel not found.");
     if (!channel.isTextBased()) throw new Error("Selected Discord channel is not a text channel.");
     if (!channel.isSendable())
-      throw new Error("Bot does not have permission to send messages in the selected channel.");
+        throw new Error("Bot does not have permission to send messages in the selected channel.");
 
-    const versionManifest = await fetch(
-      "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json",
-    )
-      .then((res) => res.json())
-      .then((json) => VersionManifestV2Schema.parse(json));
+    return channel;
+}
 
-    const latestMcVersion = versionManifest.latest.release;
+function getMcVersions() {
+    return fetch("https://launchermeta.mojang.com/mc/game/version_manifest_v2.json")
+        .then((res) => res.json())
+        .then((data) => VersionManifestV2Schema.parse(data));
+}
 
-    for (const [modId, modConfig] of Object.entries(config.mods)) {
-      for (const loader of modConfig.target_loaders) {
-        const modVersions = await labrinth.versions_v3.getProjectVersions(modId, {
-          loaders: [loader],
-        });
+export async function notify() {
+    if (!Bun.env.DISCORD_BOT_TOKEN) throw new Error("DISCORD_BOT_TOKEN is not set.");
+    if (!Bun.env.MODRINTH_API_TOKEN) throw new Error("MODRINTH_API_TOKEN is not set.");
 
-        const supportedMcVersions = new Set(
-          modVersions.flatMap((modVersion) => modVersion.game_versions),
+    const config = await getConfig();
+    const permData = await getPermData();
+    const mcVersions = await getMcVersions();
+
+    const modrinth = new GenericModrinthClient({
+        features: [
+            new RetryFeature({ maxAttempts: 3 }),
+            //@ts-expect-error typescript couldn't detect the `token` property
+            new AuthFeature({ token: Bun.env.MODRINTH_API_TOKEN }),
+        ],
+    });
+
+    const discord = new Client({
+        intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages],
+    });
+
+    const latestMinecraft = mcVersions.latest.release;
+
+    try {
+        await discord.login(Bun.env.DISCORD_BOT_TOKEN);
+        const channel = await getTextChannel(discord, config.discord.channel_id);
+
+        await channel.sendTyping();
+
+        let lines = ["|| @everyone ||"];
+
+        for (const [modId, mod] of Object.entries(config.mods)) {
+            permData[modId] ??= {};
+
+            const modProject = await modrinth.labrinth.projects_v3.get(modId);
+
+            for (const loader of mod.target_loaders) {
+                permData[modId][loader] ??= {};
+
+                const messages = await notifyMod(
+                    modrinth,
+                    permData[modId][loader],
+                    modId,
+                    loader,
+                    latestMinecraft,
+                );
+
+                if (messages.length === 0) continue;
+
+                lines.push(`## ${modProject.name} (${loader})`);
+                lines.push(...messages.map((m) => `- ${m}`));
+            }
+        }
+
+        if (lines.length <= 1) return;
+
+        await channel.send(lines.join("\n"));
+    } finally {
+        await discord.destroy();
+    }
+
+    await savePermData(permData);
+}
+
+async function notifyMod(
+    modrinth: GenericModrinthClient,
+    permData: PermData[string][string],
+    modId: string,
+    loader: string,
+    latestMinecraft: string,
+): Promise<string[]> {
+    let messages: string[] = [];
+
+    const modVersions = await modrinth.labrinth.versions_v3.getProjectVersions(modId, {
+        loaders: [loader],
+    });
+
+    const supportedMcVersions = new Set(modVersions.flatMap((v) => v.game_versions));
+    const latestSupportedMcVersion = Array.from(supportedMcVersions)
+        .toSorted(compareMcVersions)
+        .at(-1);
+
+    if (!latestSupportedMcVersion)
+        throw new Error(
+            `No supported Minecraft versions found for mod ${modId} and loader ${loader}.`,
         );
 
-        if (supportedMcVersions.has(latestMcVersion)) {
-          continue;
-        }
+    if (latestSupportedMcVersion === latestMinecraft) return messages; //TODO: 依存関係のは快適更新は通知したいかも
 
-        const lines: string[] = [];
+    if (permData.lastNotifiedMcVersion !== latestSupportedMcVersion) {
+        messages.push(MESSAGES.MINECRAFT_VERSION_UNSUPPORTED(latestSupportedMcVersion));
 
-        const isNewMcVersionNotice =
-          permData[modId]?.[loader]?.lastNotifiedMcVersion !== latestMcVersion;
-        if (isNewMcVersionNotice) {
-          lines.push(
-            `Minecraft ${latestMcVersion} was released, but this mod has not been updated for it yet.`,
-          );
+        permData.lastNotifiedMcVersion = latestSupportedMcVersion;
+    }
 
-          permData[modId] ??= {};
-          permData[modId][loader] ??= {};
-          permData[modId][loader].lastNotifiedMcVersion = latestMcVersion;
-          permData[modId][loader].notifiedDeps = {};
-          permData[modId][loader].readyForUpdateNotified = false;
+    const modVersionForLatestMc = modVersions.find((v) =>
+        v.game_versions.includes(latestSupportedMcVersion),
+    );
+    if (!modVersionForLatestMc)
+        throw new Error(
+            `No mod version found for mod ${modId}, loader ${loader}, and Minecraft version ${latestSupportedMcVersion}.`,
+        );
 
-          permDataDirty = true;
-        }
+    let isReadyToUpdate = true;
+    for (const dep of modVersionForLatestMc.dependencies) {
+        if (dep.dependency_type !== "required" || !dep.project_id) continue;
+        permData.lastDepsMcs ??= {};
 
-        const latestSupportedMcVersion = Array.from(supportedMcVersions)
-          .toSorted(compareMcVersions)
-          .at(-1);
-        const newerModVersion = modVersions.find((modVersion) =>
-          modVersion.game_versions.includes(latestSupportedMcVersion!),
-        )!;
+        const depVersionsForLatestMc = await modrinth.labrinth.versions_v3.getProjectVersions(
+            dep.project_id,
+            {
+                loaders: [loader],
+                game_versions: [latestSupportedMcVersion],
+            },
+        );
 
-        let incompatibleDepFound = false;
-        const newlyAvailableDeps: string[] = [];
-
-        for (const dep of newerModVersion.dependencies) {
-          if (dep.dependency_type !== "required") continue; // TODO: handle `embedded` dependencies
-          if (!dep.project_id) continue;
-
-          const depVersions = await labrinth.versions_v3.getProjectVersions(dep.project_id, {
-            game_versions: [latestMcVersion],
-            loaders: [loader],
-          });
-
-          const latestDepVersion = depVersions[0];
-
-          if (!latestDepVersion) {
-            incompatibleDepFound = true;
+        if (depVersionsForLatestMc.length === 0) {
+            isReadyToUpdate = false;
             continue;
-          }
-
-          if (permData[modId]?.[loader]?.notifiedDeps?.[dep.project_id]) continue;
-
-          const depLabel = dep.file_name ?? dep.project_id;
-          newlyAvailableDeps.push(`- [${depLabel}](https://modrinth.com/mod/${dep.project_id})`);
-
-          permData[modId] ??= {};
-          permData[modId][loader] ??= {};
-          permData[modId][loader].notifiedDeps ??= {};
-          permData[modId][loader].notifiedDeps[dep.project_id] = latestDepVersion.version_number;
-          permDataDirty = true;
         }
+        if (permData.lastDepsMcs[dep.project_id] === latestSupportedMcVersion) continue;
 
-        if (newlyAvailableDeps.length > 0) {
-          lines.push(`Dependency now updated for ${latestMcVersion}:`, ...newlyAvailableDeps);
-        }
+        const depName =
+            depNameCache.get(dep.project_id) ??
+            (await modrinth.labrinth.projects_v3.get(dep.project_id)).name;
+        depNameCache.set(dep.project_id, depName);
 
-        if (!incompatibleDepFound && !permData[modId]?.[loader]?.readyForUpdateNotified) {
-          lines.push(`All required dependencies are ready. This mod can be updated now.`);
-
-          permData[modId] ??= {};
-          permData[modId][loader] ??= {};
-          permData[modId][loader].readyForUpdateNotified = true;
-          permDataDirty = true;
-        }
-
-        if (lines.length === 0) continue;
-
-        const message = [
-          `@everyone`,
-          `**[${modId}](https://modrinth.com/mod/${modId})** (${loader})`,
-          ...lines,
-        ].join("\n");
-
-        await channel.send(message);
-      }
+        messages.push(MESSAGES.DEPENDENCY_SUPPORTED_NEW_MC(depName, latestSupportedMcVersion));
+        permData.lastDepsMcs[dep.project_id] = latestSupportedMcVersion;
     }
 
-    if (permDataDirty) {
-      await Bun.file(PERM_DATA_PATH).write(JSON.stringify(permData, null, 2));
-    }
-  } finally {
-    discordClient.destroy();
-  }
+    if (!isReadyToUpdate) return messages;
+    if (permData.notifiedReadyToUpdate) return messages;
+
+    messages.push(MESSAGES.READY_TO_UPDATE(latestSupportedMcVersion));
+    permData.notifiedReadyToUpdate = true;
+
+    return messages;
 }
