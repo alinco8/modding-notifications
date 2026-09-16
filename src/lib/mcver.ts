@@ -1,4 +1,4 @@
-export function isInRange(version: string, range: string) {
+export function isInRange(_version: string, range: string) {
     if (range === "*") {
         return true;
     }
