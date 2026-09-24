@@ -69,9 +69,8 @@ try {
         notifications.push(formatNotification(project.name, loaderNotifications));
     }
 
-    const text = `-# ||@everyone||\n${notifications.join("\n")}`;
-
-    if (text) {
+    if (notifications.length !== 0) {
+        const text = `-# ||@everyone||\n${notifications.join("\n")}`;
         await sendLongMessage(channel, text);
     }
 } finally {
